@@ -1,0 +1,266 @@
+networks:
+  ops-network:
+    driver: bridge
+
+services:
+  # ─── Kafka (KRaft mode) ───────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: kafka
+    networks: [ops-network]
+    ports:
+      - "9092:9092"
+      - "9101:9101" # JMX for metrics (optional but useful)
+    environment:
+      # KRaft settings
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+
+      # Listeners
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # Cluster ID - must be a valid base64 UUID, fixed so restarts don't regenerate it
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+      # Broker settings
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_NUM_PARTITIONS: 1
+
+      # JMX
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "kafka-broker-api-versions",
+          "--bootstrap-server",
+          "localhost:9092",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ─── Kafka Topic Initialiser (runs once then exits) ───────────────────────
+  kafka-init:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: kafka-init
+    networks: [ops-network]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      echo 'Creating Kafka topics...'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order.created --partitions 6 --replication-factor 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic inventory.reserved --partitions 6 --replication-factor 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic inventory.failed --partitions 6 --replication-factor 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic inventory.released --partitions 6 --replication-factor 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment.processed --partitions 6 --replication-factor 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment.failed --partitions 6 --replication-factor 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order.created.DLQ --partitions 1 --replication-factor 1 --config retention.ms=2592000000
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic inventory.events.DLQ --partitions 1 --replication-factor 1 --config retention.ms=2592000000
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment.events.DLQ --partitions 1 --replication-factor 1 --config retention.ms=2592000000
+      echo 'All topics created.'
+      "
+
+  # ─── PostgreSQL - orders_db ───────────────────────────────────────────────
+  orders-db:
+    image: postgres:16-alpine
+    container_name: orders-db
+    networks: [ops-network]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: orders_db
+      POSTGRES_USER: orders_user
+      POSTGRES_PASSWORD: orders_pass
+    volumes:
+      - orders_data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_statement=none
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders_user -d orders_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ─── PostgreSQL - inventory_db ────────────────────────────────────────────
+  inventory-db:
+    image: postgres:16-alpine
+    container_name: inventory-db
+    networks: [ops-network]
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: inventory_db
+      POSTGRES_USER: inventory_user
+      POSTGRES_PASSWORD: inventory_pass
+    volumes:
+      - inventory_data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_statement=none
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory_user -d inventory_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ─── PostgreSQL - payments_db ─────────────────────────────────────────────
+  payments-db:
+    image: postgres:16-alpine
+    container_name: payments-db
+    networks: [ops-network]
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_DB: payments_db
+      POSTGRES_USER: payments_user
+      POSTGRES_PASSWORD: payments_pass
+    volumes:
+      - payments_data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_statement=none
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments_user -d payments_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ─── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    networks: [ops-network]
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── Zipkin ───────────────────────────────────────────────────────────────
+  zipkin:
+    image: openzipkin/zipkin:3
+    container_name: zipkin
+    networks: [ops-network]
+    ports:
+      - "9411:9411"
+    environment:
+      STORAGE_TYPE: mem
+      MEM_MAX_SPANS: 500000
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9411/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ─── Prometheus ───────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus
+    networks: [ops-network]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ─── Grafana ──────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    networks: [ops-network]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  orders_data:
+  inventory_data:
+  payments_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

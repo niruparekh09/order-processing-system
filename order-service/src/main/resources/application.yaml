@@ -1,3 +1,96 @@
+server:
+  port: 8081
+
 spring:
   application:
     name: order-service
+
+  # ── DataSource ────────────────────────────────────────────────────────────
+  datasource:
+    url: jdbc:postgresql://localhost:5432/orders_db
+    username: orders_user
+    password: orders_pass
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: OrderServiceHikariPool
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+      leak-detection-threshold: 60000
+
+  # ── JPA ───────────────────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate # Flyway owns the schema, Hibernate only validates
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: public
+        jdbc:
+          batch_size: 25
+        order_inserts: true
+        order_updates: true
+
+  # ── Flyway ────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    validate-on-migrate: true
+    out-of-order: false
+
+  # ── Kafka ─────────────────────────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all # wait for all ISR replicas to acknowledge
+      retries: 3
+      properties:
+        enable.idempotence: true # exactly-once producer semantics
+        max.in.flight.requests.per.connection: 1
+    consumer:
+      group-id: order-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false # manual offset commit only
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 10
+          max-idle: 5
+          min-idle: 1
+
+# ── Actuator ──────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
+
+# ── Outbox Poller ─────────────────────────────────────────────────────────
+outbox:
+  poller:
+    fixed-delay-ms: 1000
+    batch-size: 10
+    advisory-lock-id: 72857438 # arbitrary fixed long, unique per service

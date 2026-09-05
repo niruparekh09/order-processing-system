@@ -180,6 +180,7 @@ graph TB
 The single ingress point for all client traffic. Built on Spring Cloud Gateway (reactive, Netty-based — intentionally has no Spring Web dependency).
 
 **Responsibilities:**
+
 - Route resolution: maps incoming paths to the correct downstream service
 - Rate limiting: enforces request quotas per IP using Redis as the counter store
 - Correlation ID injection: generates and injects `X-Correlation-ID` if absent — this ID propagates through every downstream service and every Kafka message
@@ -194,6 +195,7 @@ The single ingress point for all client traffic. Built on Spring Cloud Gateway (
 The entry point for business logic. Owns the `orders_db` PostgreSQL instance exclusively.
 
 **Responsibilities:**
+
 - Accept `POST /api/v1/orders` requests
 - Validate the request payload and the `Idempotency-Key` header
 - Execute the transactional outbox write — the most critical operation in the system
@@ -211,6 +213,7 @@ The entry point for business logic. Owns the `orders_db` PostgreSQL instance exc
 Responsible for stock management. Owns the `inventory_db` PostgreSQL instance exclusively.
 
 **Responsibilities:**
+
 - Consume `order.created` events and attempt to reserve stock
 - Use optimistic locking (`@Version` column) on the `products` table to prevent oversell under concurrency
 - Publish `inventory.reserved` on success or `inventory.failed` on insufficient stock
@@ -228,6 +231,7 @@ Responsible for stock management. Owns the `inventory_db` PostgreSQL instance ex
 Responsible for payment capture. Owns the `payments_db` PostgreSQL instance exclusively.
 
 **Responsibilities:**
+
 - Consume `inventory.reserved` events and attempt to process payment
 - Insert a payment record before attempting the charge — the UNIQUE constraint on `order_id` provides database-level idempotency
 - Publish `payment.processed` on success or `payment.failed` on decline
@@ -244,6 +248,7 @@ Responsible for payment capture. Owns the `payments_db` PostgreSQL instance excl
 A stateless, high-throughput event consumer. Owns no database. Intentionally built in Go to demonstrate polyglot architecture and to leverage Go's goroutine concurrency model for I/O-bound workloads.
 
 **Responsibilities:**
+
 - Consume terminal-state events: `inventory.failed`, `payment.processed`, `payment.failed`
 - Dispatch mock email and SMS notifications appropriate to each outcome
 - Structured JSON logging via `zerolog`
@@ -481,6 +486,7 @@ If Redis is unavailable, the system falls back to database-only idempotency — 
 Each service owns its own PostgreSQL instance exclusively. This is not a preference — it is an architectural constraint enforcing service autonomy.
 
 **Enforcement rules:**
+
 - No service imports another service's JPA entities
 - No cross-database foreign keys anywhere in the system
 - No shared schema or shared connection pool
@@ -618,16 +624,16 @@ stateDiagram-v2
 
 #### State Transition Rules
 
-| From State | Event Consumed | To State | Actor |
-|---|---|---|---|
-| *(new)* | `POST /api/v1/orders` | `PENDING` | Order Service |
-| `PENDING` | `inventory.reserved` | `INVENTORY_RESERVED` | Order Service |
-| `PENDING` | `inventory.failed` | `INVENTORY_FAILED` | Order Service |
-| `INVENTORY_RESERVED` | `payment.processed` | `COMPLETED` | Order Service |
-| `INVENTORY_RESERVED` | `payment.failed` | `PAYMENT_FAILED` | Order Service |
-| `PAYMENT_FAILED` | *(internal transition)* | `COMPENSATING` | Order Service |
-| `COMPENSATING` | `inventory.released` | `CANCELLED` | Order Service |
-| `INVENTORY_FAILED` | *(immediately)* | `CANCELLED` | Order Service |
+| From State           | Event Consumed          | To State             | Actor         |
+| -------------------- | ----------------------- | -------------------- | ------------- |
+| _(new)_              | `POST /api/v1/orders`   | `PENDING`            | Order Service |
+| `PENDING`            | `inventory.reserved`    | `INVENTORY_RESERVED` | Order Service |
+| `PENDING`            | `inventory.failed`      | `INVENTORY_FAILED`   | Order Service |
+| `INVENTORY_RESERVED` | `payment.processed`     | `COMPLETED`          | Order Service |
+| `INVENTORY_RESERVED` | `payment.failed`        | `PAYMENT_FAILED`     | Order Service |
+| `PAYMENT_FAILED`     | _(internal transition)_ | `COMPENSATING`       | Order Service |
+| `COMPENSATING`       | `inventory.released`    | `CANCELLED`          | Order Service |
+| `INVENTORY_FAILED`   | _(immediately)_         | `CANCELLED`          | Order Service |
 
 `COMPLETED` and `CANCELLED` are terminal states. No further transitions are permitted.
 
@@ -635,17 +641,17 @@ stateDiagram-v2
 
 ## Kafka Topic Design
 
-| Topic | Partitions | Retention | Partition Key | Publisher | Consumers |
-|---|---|---|---|---|---|
-| `order.created` | 6 | 7 days | `orderId` | Order Service | Inventory Service |
-| `inventory.reserved` | 6 | 7 days | `orderId` | Inventory Service | Payment Service, Order Service |
-| `inventory.failed` | 6 | 7 days | `orderId` | Inventory Service | Order Service, Notification Service |
-| `inventory.released` | 6 | 7 days | `orderId` | Inventory Service | Order Service |
-| `payment.processed` | 6 | 7 days | `orderId` | Payment Service | Order Service, Notification Service |
-| `payment.failed` | 6 | 7 days | `orderId` | Payment Service | Inventory Service, Order Service, Notification Service |
-| `order.created.DLQ` | 1 | 30 days | `orderId` | Kafka Error Handler | Ops / manual replay |
-| `inventory.events.DLQ` | 1 | 30 days | `orderId` | Kafka Error Handler | Ops / manual replay |
-| `payment.events.DLQ` | 1 | 30 days | `orderId` | Kafka Error Handler | Ops / manual replay |
+| Topic                  | Partitions | Retention | Partition Key | Publisher           | Consumers                                              |
+| ---------------------- | ---------- | --------- | ------------- | ------------------- | ------------------------------------------------------ |
+| `order.created`        | 6          | 7 days    | `orderId`     | Order Service       | Inventory Service                                      |
+| `inventory.reserved`   | 6          | 7 days    | `orderId`     | Inventory Service   | Payment Service, Order Service                         |
+| `inventory.failed`     | 6          | 7 days    | `orderId`     | Inventory Service   | Order Service, Notification Service                    |
+| `inventory.released`   | 6          | 7 days    | `orderId`     | Inventory Service   | Order Service                                          |
+| `payment.processed`    | 6          | 7 days    | `orderId`     | Payment Service     | Order Service, Notification Service                    |
+| `payment.failed`       | 6          | 7 days    | `orderId`     | Payment Service     | Inventory Service, Order Service, Notification Service |
+| `order.created.DLQ`    | 1          | 30 days   | `orderId`     | Kafka Error Handler | Ops / manual replay                                    |
+| `inventory.events.DLQ` | 1          | 30 days   | `orderId`     | Kafka Error Handler | Ops / manual replay                                    |
+| `payment.events.DLQ`   | 1          | 30 days   | `orderId`     | Kafka Error Handler | Ops / manual replay                                    |
 
 #### Why 6 Partitions
 
@@ -667,31 +673,31 @@ Every Kafka message in this system — across all services, in all languages —
 
 ```json
 {
-  "eventId":       "b2e4f8a1-3c7d-4e9f-8a1b-2c3d4e5f6a7b",
-  "eventType":     "ORDER_CREATED",
-  "eventVersion":  "v1",
-  "aggregateId":   "a1b2c3d4-e5f6-7a8b-9c0d-e1f2a3b4c5d6",
+  "eventId": "b2e4f8a1-3c7d-4e9f-8a1b-2c3d4e5f6a7b",
+  "eventType": "ORDER_CREATED",
+  "eventVersion": "v1",
+  "aggregateId": "a1b2c3d4-e5f6-7a8b-9c0d-e1f2a3b4c5d6",
   "aggregateType": "ORDER",
   "correlationId": "f1e2d3c4-b5a6-7f8e-9d0c-b1a2f3e4d5c6",
-  "causationId":   "e1d2c3b4-a5f6-7e8d-9c0b-a1f2e3d4c5b6",
-  "occurredAt":    "2026-08-15T10:30:00.000Z",
-  "producer":      "order-service",
-  "payload": { }
+  "causationId": "e1d2c3b4-a5f6-7e8d-9c0b-a1f2e3d4c5b6",
+  "occurredAt": "2026-08-15T10:30:00.000Z",
+  "producer": "order-service",
+  "payload": {}
 }
 ```
 
-| Field | Type | Purpose |
-|---|---|---|
-| `eventId` | UUID | Unique per event instance. Used as the idempotency key by all consumers. |
-| `eventType` | String | Semantic event name. Consumers switch on this field. |
-| `eventVersion` | String | Schema version. Consumers handle `v1` and `v2` conditionally — no coordinated flag day needed. |
-| `aggregateId` | UUID | ID of the domain object — typically `orderId`. |
-| `aggregateType` | String | Domain category. Useful for generic processors and audit logs. |
-| `correlationId` | UUID | Original HTTP request ID. Injected by API Gateway. Propagated unchanged through every event and every log line. |
-| `causationId` | UUID | `eventId` of the event that caused this one. Enables full causal chain reconstruction from logs alone. |
-| `occurredAt` | ISO 8601 | Business timestamp. Not the Kafka ingestion timestamp. |
-| `producer` | String | Originating service. Essential for DLQ triage. |
-| `payload` | Object | Domain-specific data, varying by `eventType`. |
+| Field           | Type     | Purpose                                                                                                         |
+| --------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `eventId`       | UUID     | Unique per event instance. Used as the idempotency key by all consumers.                                        |
+| `eventType`     | String   | Semantic event name. Consumers switch on this field.                                                            |
+| `eventVersion`  | String   | Schema version. Consumers handle `v1` and `v2` conditionally — no coordinated flag day needed.                  |
+| `aggregateId`   | UUID     | ID of the domain object — typically `orderId`.                                                                  |
+| `aggregateType` | String   | Domain category. Useful for generic processors and audit logs.                                                  |
+| `correlationId` | UUID     | Original HTTP request ID. Injected by API Gateway. Propagated unchanged through every event and every log line. |
+| `causationId`   | UUID     | `eventId` of the event that caused this one. Enables full causal chain reconstruction from logs alone.          |
+| `occurredAt`    | ISO 8601 | Business timestamp. Not the Kafka ingestion timestamp.                                                          |
+| `producer`      | String   | Originating service. Essential for DLQ triage.                                                                  |
+| `payload`       | Object   | Domain-specific data, varying by `eventType`.                                                                   |
 
 ---
 
@@ -707,16 +713,16 @@ In Zipkin at `http://localhost:9411`, a completed order shows the full span tree
 
 All Java services expose `/actuator/prometheus`. The Go Notification Service exposes `/metrics` in the same Prometheus exposition format. Prometheus scrapes all services every 15 seconds.
 
-| Metric | Type | Meaning |
-|---|---|---|
-| `orders_created_total` | Counter | Orders accepted |
-| `orders_completed_total` | Counter | Orders reaching COMPLETED |
-| `orders_failed_total` | Counter | Orders reaching CANCELLED |
-| `outbox_events_pending` | Gauge | Unpublished outbox backlog — spikes indicate Kafka issues |
-| `kafka_consumer_lag` | Gauge | Consumer group lag — spikes indicate slow consumer or poison message |
-| `inventory_reservation_duration_seconds` | Histogram | P50/P95/P99 reservation latency |
-| `payment_processing_duration_seconds` | Histogram | P50/P95/P99 payment latency |
-| `resilience4j_circuitbreaker_state` | Gauge | 0=CLOSED, 1=OPEN, 2=HALF_OPEN |
+| Metric                                   | Type      | Meaning                                                              |
+| ---------------------------------------- | --------- | -------------------------------------------------------------------- |
+| `orders_created_total`                   | Counter   | Orders accepted                                                      |
+| `orders_completed_total`                 | Counter   | Orders reaching COMPLETED                                            |
+| `orders_failed_total`                    | Counter   | Orders reaching CANCELLED                                            |
+| `outbox_events_pending`                  | Gauge     | Unpublished outbox backlog — spikes indicate Kafka issues            |
+| `kafka_consumer_lag`                     | Gauge     | Consumer group lag — spikes indicate slow consumer or poison message |
+| `inventory_reservation_duration_seconds` | Histogram | P50/P95/P99 reservation latency                                      |
+| `payment_processing_duration_seconds`    | Histogram | P50/P95/P99 payment latency                                          |
+| `resilience4j_circuitbreaker_state`      | Gauge     | 0=CLOSED, 1=OPEN, 2=HALF_OPEN                                        |
 
 ### Structured Logging
 
@@ -735,6 +741,7 @@ During OPEN state, Payment Service publishes `payment.failed` immediately, trigg
 ### Retry Policy
 
 Spring Kafka's `DefaultErrorHandler` with exponential backoff on Java consumers:
+
 - Attempt 1: immediate
 - Attempt 2: 1 second delay
 - Attempt 3: 2 second delay
@@ -752,13 +759,13 @@ Idempotency and resilience are inseparable. The ability to safely retry any oper
 
 ### Prerequisites
 
-| Tool | Version | Notes |
-|---|---|---|
-| Java | 21 | `java -version` |
-| Maven | 3.9+ | `mvn -version` |
-| Go | 1.22+ | `go version` |
-| OrbStack | Latest | Docker runtime on macOS |
-| Git | Any | |
+| Tool     | Version | Notes                   |
+| -------- | ------- | ----------------------- |
+| Java     | 21      | `java -version`         |
+| Maven    | 3.9+    | `mvn -version`          |
+| Go       | 1.22+   | `go version`            |
+| OrbStack | Latest  | Docker runtime on macOS |
+| Git      | Any     |                         |
 
 ### 1. Clone the Repository
 
@@ -792,11 +799,11 @@ go run ./cmd/main.go   # Tab 4
 
 ### 5. Observability UIs
 
-| UI | URL | Credentials |
-|---|---|---|
-| Zipkin | http://localhost:9411 | None |
-| Prometheus | http://localhost:9090 | None |
-| Grafana | http://localhost:3000 | admin / admin |
+| UI         | URL                   | Credentials   |
+| ---------- | --------------------- | ------------- |
+| Zipkin     | http://localhost:9411 | None          |
+| Prometheus | http://localhost:9090 | None          |
+| Grafana    | http://localhost:3000 | admin / admin |
 
 ### 6. Place a Test Order
 
@@ -834,18 +841,18 @@ curl http://localhost:8080/api/v1/orders/{orderId}
 POST /api/v1/orders
 ```
 
-| Header | Required | Description |
-|---|---|---|
-| `Content-Type` | Yes | `application/json` |
-| `Idempotency-Key` | Yes | Client UUID. Same key within 24 hours returns same response without reprocessing. |
-| `X-Correlation-ID` | No | Injected by API Gateway if absent. |
+| Header             | Required | Description                                                                       |
+| ------------------ | -------- | --------------------------------------------------------------------------------- |
+| `Content-Type`     | Yes      | `application/json`                                                                |
+| `Idempotency-Key`  | Yes      | Client UUID. Same key within 24 hours returns same response without reprocessing. |
+| `X-Correlation-ID` | No       | Injected by API Gateway if absent.                                                |
 
-| Status | Meaning |
-|---|---|
-| `202 Accepted` | Order accepted, processing asynchronously |
-| `400 Bad Request` | Validation failure |
-| `409 Conflict` | Idempotency-Key already used |
-| `429 Too Many Requests` | Rate limit exceeded |
+| Status                  | Meaning                                   |
+| ----------------------- | ----------------------------------------- |
+| `202 Accepted`          | Order accepted, processing asynchronously |
+| `400 Bad Request`       | Validation failure                        |
+| `409 Conflict`          | Idempotency-Key already used              |
+| `429 Too Many Requests` | Rate limit exceeded                       |
 
 ### Get Order Status
 
@@ -859,40 +866,40 @@ Returns current order state including status, items, and timestamps.
 
 ## Architecture Decision Records
 
-| Decision | Choice | Rationale |
-|---|---|---|
-| Inter-service communication | Kafka events (async) | Eliminates runtime coupling. Services survive each other's downtime. |
-| Dual-write solution | Transactional Outbox Pattern | Atomic DB write + event publication without distributed transactions. |
-| Distributed transaction strategy | Saga — Choreography | No central orchestrator, no single point of failure. Each service owns its step and its rollback. |
-| Consumer deduplication | Redis SET NX EX + DB UNIQUE constraints | Atomic fast path in Redis; DB constraint as correctness guarantee that survives Redis unavailability. |
-| Inventory race condition | Optimistic locking (`@Version`) | Prevents oversell without pessimistic locks that would serialise all writes. |
-| Outbox multi-pod safety | PostgreSQL advisory locks | Safe horizontal scaling with zero external coordination infrastructure. |
-| Schema evolution | `eventVersion` in all event envelopes | Conditional handling of v1/v2 payloads — no coordinated deployment required. |
-| API response for order creation | `202 Accepted` | Outcome unknown at response time. Correct HTTP semantic for async acceptance. |
-| Partition key | `orderId` | Per-order event ordering guaranteed within each topic. |
-| Compensation acknowledgement | `inventory.released` topic | Explicit event confirms stock was restored before order moves to CANCELLED. Closes the compensation gap. |
-| Notification Service language | Go | I/O-bound, stateless consumer — goroutine model and minimal memory footprint are operationally correct. |
+| Decision                         | Choice                                  | Rationale                                                                                                |
+| -------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Inter-service communication      | Kafka events (async)                    | Eliminates runtime coupling. Services survive each other's downtime.                                     |
+| Dual-write solution              | Transactional Outbox Pattern            | Atomic DB write + event publication without distributed transactions.                                    |
+| Distributed transaction strategy | Saga — Choreography                     | No central orchestrator, no single point of failure. Each service owns its step and its rollback.        |
+| Consumer deduplication           | Redis SET NX EX + DB UNIQUE constraints | Atomic fast path in Redis; DB constraint as correctness guarantee that survives Redis unavailability.    |
+| Inventory race condition         | Optimistic locking (`@Version`)         | Prevents oversell without pessimistic locks that would serialise all writes.                             |
+| Outbox multi-pod safety          | PostgreSQL advisory locks               | Safe horizontal scaling with zero external coordination infrastructure.                                  |
+| Schema evolution                 | `eventVersion` in all event envelopes   | Conditional handling of v1/v2 payloads — no coordinated deployment required.                             |
+| API response for order creation  | `202 Accepted`                          | Outcome unknown at response time. Correct HTTP semantic for async acceptance.                            |
+| Partition key                    | `orderId`                               | Per-order event ordering guaranteed within each topic.                                                   |
+| Compensation acknowledgement     | `inventory.released` topic              | Explicit event confirms stock was restored before order moves to CANCELLED. Closes the compensation gap. |
+| Notification Service language    | Go                                      | I/O-bound, stateless consumer — goroutine model and minimal memory footprint are operationally correct.  |
 
 ---
 
 ## Tech Stack
 
-| Category | Technology | Version |
-|---|---|---|
-| Language (services) | Java | 21 |
-| Language (notification) | Go | 1.22+ |
-| Framework | Spring Boot | 4.1.0 |
-| API Gateway | Spring Cloud Gateway | Latest compatible |
-| Messaging | Apache Kafka (KRaft) | Confluent 7.7.0 |
-| Primary Database | PostgreSQL | 16 |
-| Cache / Idempotency Store | Redis | 7.2 |
-| Resilience | Resilience4j | Latest compatible |
-| Metrics | Micrometer + Prometheus | Latest compatible |
-| Distributed Tracing | Micrometer Tracing + Zipkin | Latest compatible |
-| Go Kafka Client | segmentio/kafka-go | Latest |
-| Go Logging | rs/zerolog | Latest |
-| Dashboards | Grafana | 10.4.x |
-| Database Migrations | Flyway | Latest compatible |
-| Containerisation | Docker + Docker Compose | OrbStack on macOS |
-| Integration Testing | Testcontainers | Latest compatible |
-| Build Tool | Maven (Java) / Go modules (Go) | 3.9+ / 1.22+ |
+| Category                  | Technology                     | Version           |
+| ------------------------- | ------------------------------ | ----------------- |
+| Language (services)       | Java                           | 21                |
+| Language (notification)   | Go                             | 1.22+             |
+| Framework                 | Spring Boot                    | 4.1.0             |
+| API Gateway               | Spring Cloud Gateway           | Latest compatible |
+| Messaging                 | Apache Kafka (KRaft)           | Confluent 7.7.0   |
+| Primary Database          | PostgreSQL                     | 16                |
+| Cache / Idempotency Store | Redis                          | 7.2               |
+| Resilience                | Resilience4j                   | Latest compatible |
+| Metrics                   | Micrometer + Prometheus        | Latest compatible |
+| Distributed Tracing       | Micrometer Tracing + Zipkin    | Latest compatible |
+| Go Kafka Client           | segmentio/kafka-go             | Latest            |
+| Go Logging                | rs/zerolog                     | Latest            |
+| Dashboards                | Grafana                        | 10.4.x            |
+| Database Migrations       | Flyway                         | Latest compatible |
+| Containerisation          | Docker + Docker Compose        | OrbStack on macOS |
+| Integration Testing       | Testcontainers                 | Latest compatible |
+| Build Tool                | Maven (Java) / Go modules (Go) | 3.9+ / 1.22+      |

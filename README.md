@@ -25,11 +25,11 @@
 
 ## Project Overview
 
-This system is a fully event-driven, microservices-based order processing platform built to production-grade standards. It handles the complete lifecycle of an e-commerce order — from creation through inventory reservation and payment capture to final confirmation — using asynchronous event choreography across independent, isolated services.
+This system is a fully event-driven, microservices-based order processing platform built to production-grade standards. It handles the complete lifecycle of an e-commerce order - from creation through inventory reservation and payment capture to final confirmation - using asynchronous event choreography across independent, isolated services.
 
 The core engineering challenge this system solves is **distributed consistency without distributed transactions**. Each service owns its data exclusively. No service calls another over HTTP at runtime. Consistency across the system is achieved through the Saga pattern, compensating transactions, and strict idempotency guarantees at every message boundary.
 
-This is a **polyglot architecture** — four services are built in Java 21 with Spring Boot 4.1.0, and the Notification Service is built in Go. The language choice for each service is deliberate: Go's goroutine concurrency model is better suited to the Notification Service's purely I/O-bound, high-throughput consumption workload.
+This is a **polyglot architecture** - four services are built in Java 21 with Spring Boot 4.1.0, and the Notification Service is built in Go. The language choice for each service is deliberate: Go's goroutine concurrency model is better suited to the Notification Service's purely I/O-bound, high-throughput consumption workload.
 
 **What this system demonstrates end-to-end:**
 
@@ -40,7 +40,7 @@ This is a **polyglot architecture** — four services are built in Java 21 with 
 - Compensating transactions automatically restoring consistency when payment fails
 - Full distributed tracing with a single correlation ID flowing from HTTP ingress through every Kafka hop
 - Circuit breakers and retry policies preventing cascade failures
-- Polyglot microservices — Java/Spring for domain-heavy services, Go for high-throughput I/O consumers
+- Polyglot microservices - Java/Spring for domain-heavy services, Go for high-throughput I/O consumers
 
 ---
 
@@ -50,7 +50,7 @@ This is a **polyglot architecture** — four services are built in Java 21 with 
 
 A synchronous REST-based architecture for order processing would require the Order Service to directly call Inventory Service and Payment Service over HTTP. This creates three critical problems:
 
-**Temporal coupling**: if Inventory Service is down, Order Service cannot function — even though creating an order and reserving inventory are logically separable concerns.
+**Temporal coupling**: if Inventory Service is down, Order Service cannot function - even though creating an order and reserving inventory are logically separable concerns.
 
 **Cascading failures**: a slow Payment Service response blocks Order Service threads, which backs up the request queue, which causes the API Gateway to timeout, which cascades to the client.
 
@@ -60,15 +60,15 @@ The event-driven approach inverts this. Order Service writes its intent to Kafka
 
 ### Why Choreography over Orchestration
 
-An orchestrated saga requires a central coordinator — typically a dedicated Saga Orchestrator service — that explicitly calls each participant in sequence and manages the overall workflow state. This solves one problem (coordination) while introducing another: the orchestrator becomes a single point of failure and a bottleneck for all order flows.
+An orchestrated saga requires a central coordinator - typically a dedicated Saga Orchestrator service - that explicitly calls each participant in sequence and manages the overall workflow state. This solves one problem (coordination) while introducing another: the orchestrator becomes a single point of failure and a bottleneck for all order flows.
 
 Choreography distributes the coordination logic into each service. The Inventory Service knows: "when I see an `order.created` event, I reserve stock and publish the outcome." The Payment Service knows: "when I see an `inventory.reserved` event, I process payment." No service has global knowledge. Each service is fully autonomous. The workflow emerges from the combination of reactions.
 
-The tradeoff is that the overall flow is harder to visualise from any single service's code — which is precisely why the sequence diagrams and this documentation exist.
+The tradeoff is that the overall flow is harder to visualise from any single service's code - which is precisely why the sequence diagrams and this documentation exist.
 
 ### Why Go for Notification Service
 
-Notification Service is a pure I/O-bound consumer — it reads from Kafka and dispatches outbound calls. It has no database, no complex business logic, no ORM. Go's goroutine model handles thousands of concurrent I/O operations at a fraction of the memory cost of JVM threads. A Go goroutine starts with ~2KB of stack versus ~512KB for a Java thread. The compiled binary starts in under 100ms and idles at ~15MB — compared to 2-3 seconds startup and ~200MB idle for an equivalent Spring Boot service. For a stateless, high-throughput consumer, Go is the operationally correct choice. This decision also demonstrates that language selection should follow the problem, not default to a single stack.
+Notification Service is a pure I/O-bound consumer - it reads from Kafka and dispatches outbound calls. It has no database, no complex business logic, no ORM. Go's goroutine model handles thousands of concurrent I/O operations at a fraction of the memory cost of JVM threads. A Go goroutine starts with ~2KB of stack versus ~512KB for a Java thread. The compiled binary starts in under 100ms and idles at ~15MB - compared to 2-3 seconds startup and ~200MB idle for an equivalent Spring Boot service. For a stateless, high-throughput consumer, Go is the operationally correct choice. This decision also demonstrates that language selection should follow the problem, not default to a single stack.
 
 ---
 
@@ -175,22 +175,22 @@ graph TB
 
 ## Service Breakdown
 
-### API Gateway — Port 8080 — Java / Spring Cloud Gateway
+### API Gateway - Port 8080 - Java / Spring Cloud Gateway
 
-The single ingress point for all client traffic. Built on Spring Cloud Gateway (reactive, Netty-based — intentionally has no Spring Web dependency).
+The single ingress point for all client traffic. Built on Spring Cloud Gateway (reactive, Netty-based - intentionally has no Spring Web dependency).
 
 **Responsibilities:**
 
 - Route resolution: maps incoming paths to the correct downstream service
 - Rate limiting: enforces request quotas per IP using Redis as the counter store
-- Correlation ID injection: generates and injects `X-Correlation-ID` if absent — this ID propagates through every downstream service and every Kafka message
+- Correlation ID injection: generates and injects `X-Correlation-ID` if absent - this ID propagates through every downstream service and every Kafka message
 - Idempotency-Key validation: ensures the header is present on state-mutating endpoints before forwarding
 
 **What it does not do:** business logic, database access, or Kafka interaction.
 
 ---
 
-### Order Service — Port 8081 — Java 21 / Spring Boot 4.1.0
+### Order Service - Port 8081 - Java 21 / Spring Boot 4.1.0
 
 The entry point for business logic. Owns the `orders_db` PostgreSQL instance exclusively.
 
@@ -198,17 +198,17 @@ The entry point for business logic. Owns the `orders_db` PostgreSQL instance exc
 
 - Accept `POST /api/v1/orders` requests
 - Validate the request payload and the `Idempotency-Key` header
-- Execute the transactional outbox write — the most critical operation in the system
+- Execute the transactional outbox write - the most critical operation in the system
 - Run the Outbox Poller with PostgreSQL advisory lock for safe horizontal scaling
 - Consume terminal-state events from Kafka to update order status
 
-**Key design constraint:** Order Service never calls Inventory Service or Payment Service. It publishes its intent and later learns the outcome by consuming events. The API returns `202 Accepted` — not `200 OK` — because the order outcome is not known at response time.
+**Key design constraint:** Order Service never calls Inventory Service or Payment Service. It publishes its intent and later learns the outcome by consuming events. The API returns `202 Accepted` - not `200 OK` - because the order outcome is not known at response time.
 
 **Tables owned:** `orders`, `order_items`, `outbox_events`
 
 ---
 
-### Inventory Service — Port 8082 — Java 21 / Spring Boot 4.1.0
+### Inventory Service - Port 8082 - Java 21 / Spring Boot 4.1.0
 
 Responsible for stock management. Owns the `inventory_db` PostgreSQL instance exclusively.
 
@@ -217,7 +217,7 @@ Responsible for stock management. Owns the `inventory_db` PostgreSQL instance ex
 - Consume `order.created` events and attempt to reserve stock
 - Use optimistic locking (`@Version` column) on the `products` table to prevent oversell under concurrency
 - Publish `inventory.reserved` on success or `inventory.failed` on insufficient stock
-- Consume `payment.failed` events and execute the compensating transaction — release reserved stock
+- Consume `payment.failed` events and execute the compensating transaction - release reserved stock
 - Publish `inventory.released` after compensation completes, allowing Order Service to transition to `CANCELLED`
 
 **Key design constraint:** Inventory Service has no knowledge of Payment Service internals. It reacts to `payment.failed` purely because it has subscribed to that topic.
@@ -226,14 +226,14 @@ Responsible for stock management. Owns the `inventory_db` PostgreSQL instance ex
 
 ---
 
-### Payment Service — Port 8083 — Java 21 / Spring Boot 4.1.0
+### Payment Service - Port 8083 - Java 21 / Spring Boot 4.1.0
 
 Responsible for payment capture. Owns the `payments_db` PostgreSQL instance exclusively.
 
 **Responsibilities:**
 
 - Consume `inventory.reserved` events and attempt to process payment
-- Insert a payment record before attempting the charge — the UNIQUE constraint on `order_id` provides database-level idempotency
+- Insert a payment record before attempting the charge - the UNIQUE constraint on `order_id` provides database-level idempotency
 - Publish `payment.processed` on success or `payment.failed` on decline
 - Apply two-layer idempotency: Redis fast path + database constraint
 
@@ -243,7 +243,7 @@ Responsible for payment capture. Owns the `payments_db` PostgreSQL instance excl
 
 ---
 
-### Notification Service — Port 8084 — Go
+### Notification Service - Port 8084 - Go
 
 A stateless, high-throughput event consumer. Owns no database. Intentionally built in Go to demonstrate polyglot architecture and to leverage Go's goroutine concurrency model for I/O-bound workloads.
 
@@ -253,9 +253,9 @@ A stateless, high-throughput event consumer. Owns no database. Intentionally bui
 - Dispatch mock email and SMS notifications appropriate to each outcome
 - Structured JSON logging via `zerolog`
 - Expose `/health` endpoint for Docker and orchestrator healthchecks
-- Graceful shutdown on `SIGTERM` — drains in-flight goroutines before exit
+- Graceful shutdown on `SIGTERM` - drains in-flight goroutines before exit
 
-**Why Go specifically:** this service performs no database writes and has no complex business logic. It is pure I/O — read from Kafka, write to an external notification provider. Go goroutines handle this workload with ~2KB stack per goroutine versus ~512KB per Java thread. The service compiles to a single 8MB binary, starts in under 100ms, and idles at ~15MB memory.
+**Why Go specifically:** this service performs no database writes and has no complex business logic. It is pure I/O - read from Kafka, write to an external notification provider. Go goroutines handle this workload with ~2KB stack per goroutine versus ~512KB per Java thread. The service compiles to a single 8MB binary, starts in under 100ms, and idles at ~15MB memory.
 
 **Key design constraint:** Notification Service is a pure consumer with no outbound Kafka publishing. Its failure has zero impact on any other service's operation or the saga's correctness.
 
@@ -269,12 +269,12 @@ A stateless, high-throughput event consumer. Owns no database. Intentionally bui
 flowchart TD
     subgraph API["API Layer"]
         REQ(["POST /api/v1/orders\n+ Idempotency-Key header"])
-        IDEM_CHECK["Check Redis\nfor Idempotency-Key\n(SET NX EX — atomic)"]
+        IDEM_CHECK["Check Redis\nfor Idempotency-Key\n(SET NX EX - atomic)"]
         DUP{"Key exists\nin Redis?"}
         CACHED(["Return 202\ncached response"])
     end
 
-    subgraph TXN["Order Service — Single ACID Transaction Boundary"]
+    subgraph TXN["Order Service - Single ACID Transaction Boundary"]
         direction TB
         BEGIN(["BEGIN TRANSACTION"])
         VALIDATE["Validate request\n& business rules"]
@@ -290,11 +290,11 @@ flowchart TD
         RESPOND(["202 Accepted\n{orderId}"])
     end
 
-    subgraph RELAY["Outbox Relay — Asynchronous / Decoupled"]
+    subgraph RELAY["Outbox Relay - Asynchronous / Decoupled"]
         direction TB
         SCHEDULER["@Scheduled Poller\nfixedDelay = 1000ms"]
         LOCK{"pg_try_advisory_xact_lock\nacquired?"}
-        SKIP(["Skip — another\npod is polling"])
+        SKIP(["Skip - another\npod is polling"])
         QUERY[/"SELECT * FROM outbox_events\nWHERE status = 'PENDING'\nORDER BY created_at ASC\nLIMIT 10"/]
         KAFKA_SEND["KafkaTemplate.send(\ntopic, key, payload\n)"]
         SEND_OK{"Kafka ACK\nreceived?"}
@@ -348,7 +348,7 @@ The event is in Kafka. Inventory Service acts on it. But no order record exists.
 
 #### How the Outbox Pattern Solves It
 
-The outbox table lives inside the same database as the orders table. Writing to both in a single ACID transaction means they are always consistent — either both writes succeed or neither does. The `outbox_events` table is a guaranteed local buffer. The poller reads from it and publishes to Kafka asynchronously. If the poller crashes after publishing but before marking as published, the event is published again on the next cycle — acceptable because all consumers are idempotent.
+The outbox table lives inside the same database as the orders table. Writing to both in a single ACID transaction means they are always consistent - either both writes succeed or neither does. The `outbox_events` table is a guaranteed local buffer. The poller reads from it and publishes to Kafka asynchronously. If the poller crashes after publishing but before marking as published, the event is published again on the next cycle - acceptable because all consumers are idempotent.
 
 #### The Advisory Lock
 
@@ -356,7 +356,7 @@ The outbox table lives inside the same database as the orders table. Writing to 
 
 ---
 
-### The Saga Pattern — Choreography
+### The Saga Pattern - Choreography
 
 ```mermaid
 sequenceDiagram
@@ -378,7 +378,7 @@ sequenceDiagram
 
     Client->>GW: POST /api/v1/orders {Idempotency-Key: uuid}
     GW->>RD: SET NX idempotency:{key} (atomic check-and-set)
-    RD-->>GW: nil — new request, lock acquired
+    RD-->>GW: nil - new request, lock acquired
     GW->>OS: Forward request
 
     rect rgb(20, 60, 40)
@@ -392,7 +392,7 @@ sequenceDiagram
     GW-->>Client: 202 Accepted {orderId}
 
     rect rgb(20, 40, 70)
-        Note over OS, K: Async — Outbox Poller (advisory lock held)
+        Note over OS, K: Async - Outbox Poller (advisory lock held)
         OS->>ODB: SELECT pending outbox events
         OS->>K: PUBLISH → order.created {orderId, items, amount}
         OS->>ODB: UPDATE outbox_events SET status=PUBLISHED
@@ -400,10 +400,10 @@ sequenceDiagram
 
     K->>IS: CONSUME order.created
     IS->>RD: SET NX idempotent:inventory:{eventId} (atomic)
-    RD-->>IS: nil — not duplicate
+    RD-->>IS: nil - not duplicate
 
     rect rgb(20, 60, 40)
-        Note over IS, IDB: Optimistic Locking — prevents oversell
+        Note over IS, IDB: Optimistic Locking - prevents oversell
         IS->>IDB: UPDATE products SET qty = qty - N WHERE version = V
         IDB-->>IS: 1 row updated (version bumped)
         IS->>IDB: INSERT INTO inventory_reservations (order_id, status=RESERVED)
@@ -413,7 +413,7 @@ sequenceDiagram
 
     K->>PS: CONSUME inventory.reserved
     PS->>RD: SET NX idempotent:payment:{eventId} (atomic)
-    RD-->>PS: nil — not duplicate
+    RD-->>PS: nil - not duplicate
 
     rect rgb(20, 60, 40)
         Note over PS, PDB: Payment Processing
@@ -428,7 +428,7 @@ sequenceDiagram
     OS->>ODB: UPDATE orders SET status=COMPLETED
 
     K->>NS: CONSUME payment.processed
-    NS-->>Client: Email — Order confirmed
+    NS-->>Client: Email - Order confirmed
 
     Note over Client, RD: ════════ COMPENSATING TRANSACTION PATH (Payment Failure) ════════
 
@@ -436,7 +436,7 @@ sequenceDiagram
     PS->>K: PUBLISH → payment.failed {orderId, reason}
 
     K->>IS: CONSUME payment.failed
-    Note over IS: Compensating Transaction — Rollback Stock
+    Note over IS: Compensating Transaction - Rollback Stock
 
     rect rgb(80, 20, 20)
         IS->>IDB: UPDATE products SET qty = qty + N
@@ -452,7 +452,7 @@ sequenceDiagram
     OS->>ODB: UPDATE orders SET status=PAYMENT_FAILED
 
     K->>NS: CONSUME payment.failed
-    NS-->>Client: Email — Payment failed
+    NS-->>Client: Email - Payment failed
 ```
 
 #### Eventual Consistency
@@ -461,21 +461,21 @@ When the client receives `202 Accepted`, the order is in `PENDING`. The final ou
 
 #### Compensating Transactions vs. Rollback
 
-A database rollback undoes uncommitted work atomically. Compensating transactions are the distributed equivalent — new forward-moving operations that semantically undo previously committed work across independent service boundaries. When Payment Service publishes `payment.failed`, Inventory Service executes a new committed transaction to restore stock. The `inventory.released` event then signals Order Service to move to `CANCELLED` — a clean, consistent terminal state.
+A database rollback undoes uncommitted work atomically. Compensating transactions are the distributed equivalent - new forward-moving operations that semantically undo previously committed work across independent service boundaries. When Payment Service publishes `payment.failed`, Inventory Service executes a new committed transaction to restore stock. The `inventory.released` event then signals Order Service to move to `CANCELLED` - a clean, consistent terminal state.
 
 ---
 
-### Idempotency — Two-Layer Defence
+### Idempotency - Two-Layer Defence
 
 Kafka provides at-least-once delivery. Under rebalance, crash recovery, or broker leader election, the same message can be delivered more than once. Every consumer must handle this safely.
 
-**Layer 1 — Redis atomic SET NX EX (fast path):**
-`SET key value NX EX ttl` is a single atomic Redis operation. Only one concurrent thread can win it. The consumer checks this before any business logic. If the key exists, the event is a duplicate — discard immediately with no database access.
+**Layer 1 - Redis atomic SET NX EX (fast path):**
+`SET key value NX EX ttl` is a single atomic Redis operation. Only one concurrent thread can win it. The consumer checks this before any business logic. If the key exists, the event is a duplicate - discard immediately with no database access.
 
-**Layer 2 — Database UNIQUE constraint (correctness guarantee):**
+**Layer 2 - Database UNIQUE constraint (correctness guarantee):**
 Handles events delivered after the Redis TTL expires and the race window between DB commit and Redis write. `inventory_reservations.order_id` and `payments.order_id` have UNIQUE constraints. A duplicate insert raises a constraint violation caught and treated as a successful no-op.
 
-If Redis is unavailable, the system falls back to database-only idempotency — slower but still correct. Redis is a performance optimisation. The database is the correctness boundary.
+If Redis is unavailable, the system falls back to database-only idempotency - slower but still correct. Redis is a performance optimisation. The database is the correctness boundary.
 
 ---
 
@@ -483,14 +483,14 @@ If Redis is unavailable, the system falls back to database-only idempotency — 
 
 ### Database-per-Service Pattern
 
-Each service owns its own PostgreSQL instance exclusively. This is not a preference — it is an architectural constraint enforcing service autonomy.
+Each service owns its own PostgreSQL instance exclusively. This is not a preference - it is an architectural constraint enforcing service autonomy.
 
 **Enforcement rules:**
 
 - No service imports another service's JPA entities
 - No cross-database foreign keys anywhere in the system
 - No shared schema or shared connection pool
-- Cross-service data needs are satisfied through event payloads or read-only HTTP calls — never shared writes
+- Cross-service data needs are satisfied through event payloads or read-only HTTP calls - never shared writes
 
 ### Order Service Schema
 
@@ -591,7 +591,7 @@ CREATE TABLE payments (
 
 ---
 
-## Order Lifecycle — State Machine
+## Order Lifecycle - State Machine
 
 ```mermaid
 stateDiagram-v2
@@ -610,14 +610,14 @@ stateDiagram-v2
 
     INVENTORY_FAILED --> CANCELLED : inventory.failed consumed\nby Order Service
 
-    COMPLETED --> [*] : Terminal — notification dispatched
-    CANCELLED --> [*] : Terminal — notification dispatched
+    COMPLETED --> [*] : Terminal - notification dispatched
+    CANCELLED --> [*] : Terminal - notification dispatched
 
     note right of COMPENSATING
         Explicit state confirms
         compensation is in progress.
         CANCELLED only reached after
-        inventory.released is consumed —
+        inventory.released is consumed -
         guaranteeing stock was restored.
     end note
 ```
@@ -655,11 +655,11 @@ stateDiagram-v2
 
 #### Why 6 Partitions
 
-Six allows up to 6 parallel consumer instances per consumer group. Divisible by 2 and 3 — clean scaling to 2, 3, or 6 pods with balanced partition assignment. Partition count cannot be reduced after creation without topic recreation.
+Six allows up to 6 parallel consumer instances per consumer group. Divisible by 2 and 3 - clean scaling to 2, 3, or 6 pods with balanced partition assignment. Partition count cannot be reduced after creation without topic recreation.
 
 #### Why `orderId` as the Partition Key
 
-Kafka guarantees ordering within a single partition. Keying on `orderId` ensures all events for the same order land on the same partition and are consumed in production order — preventing a consumer from processing `payment.processed` before `inventory.reserved` for the same order.
+Kafka guarantees ordering within a single partition. Keying on `orderId` ensures all events for the same order land on the same partition and are consumed in production order - preventing a consumer from processing `payment.processed` before `inventory.reserved` for the same order.
 
 #### Why DLQ Topics Have 1 Partition
 
@@ -669,7 +669,7 @@ DLQ traffic is low-volume by design. Single partition simplifies tooling and all
 
 ## Event Envelope Specification
 
-Every Kafka message in this system — across all services, in all languages — uses this JSON structure.
+Every Kafka message in this system - across all services, in all languages - uses this JSON structure.
 
 ```json
 {
@@ -690,8 +690,8 @@ Every Kafka message in this system — across all services, in all languages —
 | --------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
 | `eventId`       | UUID     | Unique per event instance. Used as the idempotency key by all consumers.                                        |
 | `eventType`     | String   | Semantic event name. Consumers switch on this field.                                                            |
-| `eventVersion`  | String   | Schema version. Consumers handle `v1` and `v2` conditionally — no coordinated flag day needed.                  |
-| `aggregateId`   | UUID     | ID of the domain object — typically `orderId`.                                                                  |
+| `eventVersion`  | String   | Schema version. Consumers handle `v1` and `v2` conditionally - no coordinated flag day needed.                  |
+| `aggregateId`   | UUID     | ID of the domain object - typically `orderId`.                                                                  |
 | `aggregateType` | String   | Domain category. Useful for generic processors and audit logs.                                                  |
 | `correlationId` | UUID     | Original HTTP request ID. Injected by API Gateway. Propagated unchanged through every event and every log line. |
 | `causationId`   | UUID     | `eventId` of the event that caused this one. Enables full causal chain reconstruction from logs alone.          |
@@ -703,13 +703,13 @@ Every Kafka message in this system — across all services, in all languages —
 
 ## Observability Strategy
 
-### Distributed Tracing — Zipkin
+### Distributed Tracing - Zipkin
 
-Every HTTP request gets a `traceId` at the API Gateway. Micrometer's Brave bridge propagates it via B3 headers on HTTP calls and Kafka message headers on every published event. The Go Notification Service extracts the `correlationId` from the event envelope and logs it with every line — achieving the same observability without the JVM tracing bridge.
+Every HTTP request gets a `traceId` at the API Gateway. Micrometer's Brave bridge propagates it via B3 headers on HTTP calls and Kafka message headers on every published event. The Go Notification Service extracts the `correlationId` from the event envelope and logs it with every line - achieving the same observability without the JVM tracing bridge.
 
 In Zipkin at `http://localhost:9411`, a completed order shows the full span tree across all services with per-step latency.
 
-### Metrics — Prometheus + Grafana
+### Metrics - Prometheus + Grafana
 
 All Java services expose `/actuator/prometheus`. The Go Notification Service exposes `/metrics` in the same Prometheus exposition format. Prometheus scrapes all services every 15 seconds.
 
@@ -718,8 +718,8 @@ All Java services expose `/actuator/prometheus`. The Go Notification Service exp
 | `orders_created_total`                   | Counter   | Orders accepted                                                      |
 | `orders_completed_total`                 | Counter   | Orders reaching COMPLETED                                            |
 | `orders_failed_total`                    | Counter   | Orders reaching CANCELLED                                            |
-| `outbox_events_pending`                  | Gauge     | Unpublished outbox backlog — spikes indicate Kafka issues            |
-| `kafka_consumer_lag`                     | Gauge     | Consumer group lag — spikes indicate slow consumer or poison message |
+| `outbox_events_pending`                  | Gauge     | Unpublished outbox backlog - spikes indicate Kafka issues            |
+| `kafka_consumer_lag`                     | Gauge     | Consumer group lag - spikes indicate slow consumer or poison message |
 | `inventory_reservation_duration_seconds` | Histogram | P50/P95/P99 reservation latency                                      |
 | `payment_processing_duration_seconds`    | Histogram | P50/P95/P99 payment latency                                          |
 | `resilience4j_circuitbreaker_state`      | Gauge     | 0=CLOSED, 1=OPEN, 2=HALF_OPEN                                        |
@@ -732,9 +732,9 @@ Java services use Logback with JSON output. The Go service uses `zerolog` with J
 
 ## Resilience Strategy
 
-### Circuit Breakers — Resilience4j
+### Circuit Breakers - Resilience4j
 
-Applied to external dependency calls in Java services — primarily the mock payment gateway in Payment Service. Three states: CLOSED (normal), OPEN (failing fast after threshold), HALF_OPEN (probing recovery). Threshold: 50% failure rate over 10 calls. Wait duration: 30 seconds before probing.
+Applied to external dependency calls in Java services - primarily the mock payment gateway in Payment Service. Three states: CLOSED (normal), OPEN (failing fast after threshold), HALF_OPEN (probing recovery). Threshold: 50% failure rate over 10 calls. Wait duration: 30 seconds before probing.
 
 During OPEN state, Payment Service publishes `payment.failed` immediately, triggering the compensation path rather than holding threads waiting on a broken dependency.
 
@@ -751,7 +751,7 @@ The Go consumer implements equivalent retry logic using a backoff loop before co
 
 ### Idempotency as a Resilience Tool
 
-Idempotency and resilience are inseparable. The ability to safely retry any operation — Kafka re-delivery, HTTP retry, pod restart — without duplicate side effects is what makes the retry strategy safe. Without idempotency, retries corrupt data. With it, retries are free resilience.
+Idempotency and resilience are inseparable. The ability to safely retry any operation - Kafka re-delivery, HTTP retry, pod restart - without duplicate side effects is what makes the retry strategy safe. Without idempotency, retries corrupt data. With it, retries are free resilience.
 
 ---
 
@@ -870,15 +870,15 @@ Returns current order state including status, items, and timestamps.
 | -------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Inter-service communication      | Kafka events (async)                    | Eliminates runtime coupling. Services survive each other's downtime.                                     |
 | Dual-write solution              | Transactional Outbox Pattern            | Atomic DB write + event publication without distributed transactions.                                    |
-| Distributed transaction strategy | Saga — Choreography                     | No central orchestrator, no single point of failure. Each service owns its step and its rollback.        |
+| Distributed transaction strategy | Saga - Choreography                     | No central orchestrator, no single point of failure. Each service owns its step and its rollback.        |
 | Consumer deduplication           | Redis SET NX EX + DB UNIQUE constraints | Atomic fast path in Redis; DB constraint as correctness guarantee that survives Redis unavailability.    |
 | Inventory race condition         | Optimistic locking (`@Version`)         | Prevents oversell without pessimistic locks that would serialise all writes.                             |
 | Outbox multi-pod safety          | PostgreSQL advisory locks               | Safe horizontal scaling with zero external coordination infrastructure.                                  |
-| Schema evolution                 | `eventVersion` in all event envelopes   | Conditional handling of v1/v2 payloads — no coordinated deployment required.                             |
+| Schema evolution                 | `eventVersion` in all event envelopes   | Conditional handling of v1/v2 payloads - no coordinated deployment required.                             |
 | API response for order creation  | `202 Accepted`                          | Outcome unknown at response time. Correct HTTP semantic for async acceptance.                            |
 | Partition key                    | `orderId`                               | Per-order event ordering guaranteed within each topic.                                                   |
 | Compensation acknowledgement     | `inventory.released` topic              | Explicit event confirms stock was restored before order moves to CANCELLED. Closes the compensation gap. |
-| Notification Service language    | Go                                      | I/O-bound, stateless consumer — goroutine model and minimal memory footprint are operationally correct.  |
+| Notification Service language    | Go                                      | I/O-bound, stateless consumer - goroutine model and minimal memory footprint are operationally correct.  |
 
 ---
 
